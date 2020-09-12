@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"github.com/google/gopacket/pcapgo"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -22,7 +24,7 @@ func CheckStream(r io.Reader) (bool, error) {
 		return false, err
 	}
 
-	_,ci, err := reader.ReadPacketData()
+	_, ci, err := reader.ReadPacketData()
 	if err != nil {
 		log.Println("Error reading packet data")
 		log.Print(err)
@@ -52,7 +54,7 @@ func CheckFile(file string) (bool, error) {
 		return false, err
 	}
 
-	defer  fl.Close()
+	defer fl.Close()
 	return CheckStream(fl)
 }
 
@@ -62,15 +64,22 @@ func CheckUrl(url string, store bool, file string) (bool, error) {
 		log.Printf("Error retrieving url: %s\n", url)
 		return false, err
 	}
+	defer rsp.Body.Close()
+	body, err := ioutil.ReadAll(rsp.Body)
+	if err != nil {
+		log.Print("Error copying response body")
+		return false, err
+	}
 
 	if rsp.StatusCode != http.StatusOK {
 		log.Printf("Unable to retrieve file, Server returned %s", rsp.Status)
 		return false, err
 	}
 
-	isValid, err := CheckStream(rsp.Body)
+	isValid, err := CheckStream(bytes.NewReader(body))
 	if !isValid && store {
 		//Invalid file, store in local directory
+
 		fl, err := os.Create(file)
 		if err != nil {
 			log.Printf("Error opening pcap file: %s", file)
@@ -78,23 +87,22 @@ func CheckUrl(url string, store bool, file string) (bool, error) {
 		}
 		defer fl.Close()
 
-		_, err =io.Copy(fl, rsp.Body)
+		_, err = io.Copy(fl, bytes.NewReader(body))
 		if err != nil {
 			log.Println("Error writing to pcap file")
 		}
 	}
 
-	return true, err
+	return isValid, err
 }
 
-func main()  {
+func main() {
 	file := flag.String("f", "", "Read local file")
 	url := flag.String("u", "", "Read from Url")
 
 	flag.Parse()
 
 	if len(*file) > 0 {
-
 		if ok, _ := CheckFile(*file); ok {
 			log.Println("No OOO packets found..")
 		} else {
@@ -102,7 +110,7 @@ func main()  {
 		}
 	} else if len(*url) > 0 {
 		tmp := strings.Split(*url, "/")
-		fName := tmp[len(tmp) - 1]
+		fName := tmp[len(tmp)-1]
 		if ok, _ := CheckUrl(*url, true, fName); ok {
 			log.Println("No OOO packets found..")
 		} else {
